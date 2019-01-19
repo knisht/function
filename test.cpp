@@ -9,34 +9,34 @@
 #include <utility>
 #include <vector>
 
-template <typename F, typename... Args>
-using func = exam::function<F(Args...)>;
+template <typename F>
+using func = exam::function<F>;
 
 void fv(){};
 int fi() { return 42; }
 
 TEST(correctness, stable)
 {
-    func<void> my_f(fv);
+    func<void()> my_f(fv);
     my_f();
 }
 
 TEST(correctness, int)
 {
-    func<int> my_f(fi);
+    func<int()> my_f(fi);
     EXPECT_EQ(my_f(), 42);
 }
 
 TEST(correctness, lambda)
 {
-    func<int> my_f([]() -> int { return 1337; });
+    func<int()> my_f([]() -> int { return 1337; });
     EXPECT_EQ(my_f(), 1337);
 }
 
 TEST(correctness, capture_lambda)
 {
     int x = 256;
-    func<int> my_f([x]() -> int { return x; });
+    func<int()> my_f([x]() -> int { return x; });
     EXPECT_EQ(my_f(), 256);
 }
 
@@ -44,14 +44,14 @@ int fii(int x) { return x * x; }
 
 TEST(correctness, args)
 {
-    func<int, int> my_f(fii);
+    func<int(int)> my_f(fii);
     EXPECT_EQ(my_f(100), 10000);
 }
 
 TEST(correctness, multiple_args)
 {
     std::string x = "hello";
-    func<int, int, long> my_f([x](int a, long b) -> int { return a + b; });
+    func<int(int, long)> my_f([x](int a, long b) -> int { return a + b; });
     EXPECT_EQ(my_f.operator bool(), true);
     EXPECT_EQ(my_f(100, 200), 300);
 }
@@ -60,13 +60,13 @@ std::string fs() { return "hello"; }
 
 TEST(correctness, non_scalar)
 {
-    func<std::string> my_f(fs);
+    func<std::string()> my_f(fs);
     EXPECT_EQ(my_f(), "hello");
 }
 
 TEST(correctness, non_scalar2)
 {
-    func<std::string, std::string> my_f(
+    func<std::string(std::string)> my_f(
         [](std::string s) -> std::string { return s + "!"; });
 
     EXPECT_EQ(my_f.operator bool(), true);
@@ -84,7 +84,7 @@ struct Huge {
 
 TEST(correctness, big_struct)
 {
-    func<Huge, Huge> my_f([](Huge h) {
+    func<Huge(Huge)> my_f([](Huge h) {
         h.data[0] = 1;
         return h;
     });
@@ -124,26 +124,26 @@ struct Funct {
 
 TEST(correctness, functor)
 {
-    func<int, int> my_f(Funct{});
+    func<int(int)> my_f(Funct{});
     EXPECT_EQ(my_f(2), 2);
 }
 
 TEST(correctness, default_ctor)
 {
-    func<void> my_f{};
+    func<void()> my_f{};
     EXPECT_EQ(my_f.operator bool(), false);
 }
 
 TEST(correctness, nullptr_ctor)
 {
-    func<void> my_f{nullptr};
+    func<void()> my_f{nullptr};
     EXPECT_EQ(my_f.operator bool(), false);
 }
 
 TEST(correctness, copy_ctor)
 {
-    func<int, int> my_f{Funct{}};
-    func<int, int> my_f2(my_f);
+    func<int(int)> my_f{Funct{}};
+    func<int(int)> my_f2(my_f);
     EXPECT_EQ(my_f2(42), 42);
 }
 
@@ -164,8 +164,8 @@ struct Non_copyable_Funct {
 TEST(correctness, move_ctor)
 {
     Non_copyable_Funct f = Non_copyable_Funct{};
-    func<int, int> my_f{std::move(f)};
-    func<int, int> my_f2(std::move(my_f));
+    func<int(int)> my_f{std::move(f)};
+    func<int(int)> my_f2(std::move(my_f));
     EXPECT_EQ(my_f.operator bool(), false);
     EXPECT_EQ(my_f2.operator bool(), true);
     EXPECT_EQ(my_f2(84), 84);
@@ -176,8 +176,8 @@ int fii2(int x) { return x * x * x; }
 
 TEST(correctness, copy_assign)
 {
-    func<int, int> my_f{fii2};
-    func<int, int> my_f2{fii};
+    func<int(int)> my_f{fii2};
+    func<int(int)> my_f2{fii};
     my_f2 = my_f;
     EXPECT_EQ(my_f.operator bool(), true);
     EXPECT_EQ(my_f2.operator bool(), true);
@@ -187,8 +187,8 @@ TEST(correctness, copy_assign)
 
 TEST(correctness, move_assign)
 {
-    func<int, int> my_f{fii2};
-    func<int, int> my_f2{fii};
+    func<int(int)> my_f{fii2};
+    func<int(int)> my_f2{fii};
     my_f2 = std::move(my_f);
     EXPECT_EQ(my_f.operator bool(), false);
     EXPECT_EQ(my_f2.operator bool(), true);
@@ -199,8 +199,8 @@ TEST(correctness, huge_swawps)
 {
     Huge h;
     auto t = [h](int x) { return x + 1; };
-    func<int, int> my_f_big(t);
-    func<int, int> my_f_small(fii);
+    func<int(int)> my_f_big(t);
+    func<int(int)> my_f_small(fii);
 
     EXPECT_EQ(my_f_big.operator bool(), true);
     EXPECT_EQ(my_f_small.operator bool(), true);
@@ -243,7 +243,7 @@ TEST(correctness, hold_big)
 {
     //    func<int> f(Non_trivial_functor{});
     F f;
-    func<void> t;
+    func<void()> t;
     //    std::function<void()> t;
     t = std::move(f);
     //    std::function<void()> f;
