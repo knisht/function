@@ -108,6 +108,8 @@ struct Funct {
 #endif
     }
 
+    Funct(Funct &&other) noexcept : id(other.id) {}
+
     int operator()(int x) const { return x; }
 
     size_t id;
@@ -158,6 +160,7 @@ struct Non_copyable_Funct {
     size_t id;
     ~Non_copyable_Funct() {}
 };
+
 TEST(correctness, move_ctor)
 {
     Non_copyable_Funct f = Non_copyable_Funct{};
@@ -210,4 +213,39 @@ TEST(correctness, huge_swawps)
 
     EXPECT_EQ(my_f_big(2), 4);
     EXPECT_EQ(my_f_small(2), 3);
+}
+
+// struct Non_trivial_functor {
+//    std::vector<int> v;
+//    Non_trivial_functor() { v.resize(1000); }
+
+//    int operator()() const { return 0; }
+//};
+
+struct F {
+    F() = default;
+    F(const F &) { std::cout << "copy\n"; }
+    F(F &&) { std::cout << "move\n"; }
+    F &operator=(const F &)
+    {
+        std::cout << "=\n";
+        return *this;
+    }
+    F &operator=(F &&other) noexcept
+    {
+        std::cout << "= move\n";
+        return *this;
+    }
+    void operator()() const { std::cout << "hello\n"; }
+};
+
+TEST(correctness, hold_big)
+{
+    //    func<int> f(Non_trivial_functor{});
+    F f;
+    func<void> t;
+    //    std::function<void()> t;
+    t = std::move(f);
+    //    std::function<void()> f;
+    // sanitizer should be calm
 }

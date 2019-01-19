@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <type_traits>
 
 namespace exam
 {
@@ -17,26 +18,39 @@ struct function<F(Args...)> {
     static const size_t BUFFER_SIZE = 64;
 
     struct concept_ {
-        virtual F call(Args... args) = 0;
+        virtual F call(Args... args) const = 0;
+        virtual void build_copy(void *buf) = 0;
         virtual void build_copy(void *buf) const = 0;
+        virtual void build_moved_copy(void *buf) noexcept = 0;
         virtual std::unique_ptr<concept_> copy() const = 0;
         virtual ~concept_() = default;
     };
 
     template <typename T>
     struct model_ : concept_ {
-        model_(T t) : t(std::forward<T>(t)) {}
+        model_(T &&t) : t(std::forward<T>(t)) {}
+        model_(T const &t) : t(t) {}
 
         std::unique_ptr<concept_> copy() const override
         {
             return std::make_unique<model_<T>>(t);
         }
 
+        void build_copy(void *buf) override { new (buf) model_<T>(t); }
+
         void build_copy(void *buf) const override { new (buf) model_<T>(t); }
+
+        void build_moved_copy(void *buf) noexcept
+        {
+            new (buf) model_<T>(std::move(t));
+        }
 
         ~model_() override = default;
 
-        F call(Args... args) override { return t(std::forward<Args>(args)...); }
+        F call(Args... args) const override
+        {
+            return t(std::forward<Args>(args)...);
+        }
 
     private:
         T t;
@@ -49,13 +63,15 @@ struct function<F(Args...)> {
     template <typename T>
     function(T t)
     {
-        if (sizeof(T) < BUFFER_SIZE) {
+        if constexpr (std::is_nothrow_move_constructible<T>::value &&
+                      (sizeof(model_<T>) < BUFFER_SIZE ||
+                       alignof(T) > alignof(size_t))) {
             is_small = true;
-            new (buffer) model_<T>(std::forward<T>(t));
+            new (&buffer) model_<T>(std::move(t));
         } else {
             is_small = false;
-            new (buffer) std::unique_ptr<concept_>(
-                std::make_unique<model_<T>>(std::forward<T>(t)));
+            new (&buffer) std::unique_ptr<concept_>(
+                std::make_unique<model_<T>>(std::move(t)));
         }
     }
 
@@ -63,11 +79,12 @@ struct function<F(Args...)> {
     {
         if (other.is_small) {
             is_small = true;
-            concept_ *other_concept = (concept_ *)(other.buffer);
-            other_concept->build_copy(buffer);
+            concept_ const *other_concept =
+                reinterpret_cast<concept_ const *>(&other.buffer);
+            other_concept->build_copy(&buffer);
         } else {
             is_small = false;
-            new (buffer) std::unique_ptr<concept_>(other.ptr->copy());
+            new (&buffer) std::unique_ptr<concept_>(other.ptr->copy());
         }
     }
 
@@ -75,13 +92,15 @@ struct function<F(Args...)> {
     {
         if (other.is_small) {
             is_small = true;
-            memcpy(buffer, other.buffer, BUFFER_SIZE);
-            std::unique_ptr<concept_> temp = nullptr;
+            concept_ *other_concept =
+                reinterpret_cast<concept_ *>(&other.buffer);
+            other_concept->build_moved_copy(&buffer);
+            other_concept->~concept_();
             other.is_small = false;
-            memcpy(other.buffer, &temp, sizeof(temp));
+            new (&other.buffer) std::unique_ptr<concept_>(nullptr);
         } else {
             is_small = false;
-            new (buffer) std::unique_ptr<concept_>(std::move(other.ptr));
+            new (&buffer) std::unique_ptr<concept_>(std::move(other.ptr));
         }
     }
 
@@ -94,22 +113,39 @@ struct function<F(Args...)> {
 
     function &operator=(function &&other) noexcept
     {
-        function f(std::move(other));
-        swap(f);
+        if (this->is_small) {
+            (reinterpret_cast<concept_ *>(&buffer))->~concept_();
+        } else {
+            (reinterpret_cast<std::unique_ptr<concept_> *>(&buffer))
+                ->~unique_ptr();
+        }
+        if (other.is_small) {
+            is_small = true;
+            concept_ *other_concept =
+                reinterpret_cast<concept_ *>(&other.buffer);
+            other_concept->build_moved_copy(&buffer);
+            other_concept->~concept_();
+            other.is_small = false;
+            new (&other.buffer) std::unique_ptr<concept_>(nullptr);
+        } else {
+            is_small = false;
+            new (&buffer) std::unique_ptr<concept_>(std::move(other.ptr));
+        }
         return *this;
     }
 
     void swap(function &other) noexcept
     {
-        std::swap(buffer, other.buffer);
-        std::swap(is_small, other.is_small);
+        function f(std::move(other));
+        other = std::move(*this);
+        *this = std::move(f);
     }
 
     F operator()(Args... args) const
     {
         if (is_small) {
-            concept_ *concept_ptr = (concept_ *)(buffer);
-            return concept_ptr->call(std::forward<Args>(args)...);
+            return reinterpret_cast<concept_ const *>(&buffer)->call(
+                std::forward<Args>(args)...);
         } else {
             return ptr->call(std::forward<Args>(args)...);
         }
@@ -123,16 +159,18 @@ struct function<F(Args...)> {
     ~function()
     {
         if (!is_small) {
-            ptr.reset();
+            (reinterpret_cast<std::unique_ptr<concept_> *>(&buffer))
+                ->~unique_ptr();
         } else {
-            ((concept_ *)(buffer))->~concept_();
+            (reinterpret_cast<concept_ *>(&buffer))->~concept_();
         }
     }
 
 private:
     union {
+        typename std::aligned_storage<BUFFER_SIZE, alignof(size_t)>::type
+            buffer;
         std::unique_ptr<concept_> ptr;
-        char buffer[BUFFER_SIZE];
     };
     bool is_small;
 };
