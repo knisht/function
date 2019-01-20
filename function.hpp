@@ -64,8 +64,8 @@ struct function<F(Args...)> {
     function(T t)
     {
         if constexpr (std::is_nothrow_move_constructible<T>::value &&
-                      (sizeof(model_<T>) < BUFFER_SIZE ||
-                       alignof(T) > alignof(size_t))) {
+                      sizeof(model_<T>) <= BUFFER_SIZE &&
+                      alignof(model_<T>) <= alignof(size_t)) {
             is_small = true;
             new (&buffer) model_<T>(std::move(t));
         } else {
@@ -176,7 +176,7 @@ private:
 };
 
 template <typename F, typename... Args>
-void swap(function<F(Args...)> &f1, function<F(Args...)> &f2)
+void swap(function<F(Args...)> &f1, function<F(Args...)> &f2) noexcept
 {
     f1.swap(f2);
 }
