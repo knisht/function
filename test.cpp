@@ -148,43 +148,9 @@ TEST(correctness, copy_ctor)
     EXPECT_EQ(my_f2(42), 42);
 }
 
-enum class detection_policy { COPY, MOVE, BOTH };
-
-template <bool Noexcept>
-struct detector {
-    detector(bool *watcher, detection_policy policy)
-        : watcher(watcher), policy(policy)
-    {
-    }
-
-    detector(detector const &other)
-        : watcher(other.watcher), policy(other.policy)
-    {
-        if (policy == detection_policy::COPY ||
-            policy == detection_policy::BOTH) {
-            *watcher = true;
-        }
-    }
-
-    detector(detector &&other) noexcept(Noexcept)
-        : watcher{other.watcher}, policy(other.policy)
-    {
-        if (policy == detection_policy::MOVE ||
-            policy == detection_policy::BOTH) {
-            *watcher = true;
-        }
-    }
-
-    int operator()(int x) const { return x; }
-    bool *watcher;
-    detection_policy policy;
-    ~detector() {}
-};
-
 TEST(correctness, move_ctor)
 {
-    bool copy_detector = false;
-    detector<true> f = detector<true>{&copy_detector, detection_policy::COPY};
+    Funct f = Funct{};
     tested_function<int(int)> my_f{std::move(f)};
     tested_function<int(int)> my_f2(std::move(my_f));
     EXPECT_EQ(static_cast<bool>(my_f), false);
@@ -235,67 +201,18 @@ TEST(correctness, huge_swaps)
     EXPECT_EQ(my_f_small(2), 3);
 }
 
-TEST(correctness, nothrow_move_ctor)
-{
-    bool copy_watch;
-    tested_function<int(int)> f1(
-        detector<true>{&copy_watch, detection_policy::COPY});
-    copy_watch = false;
-    tested_function<int(int)> f2 = std::move(f1);
-    EXPECT_EQ(copy_watch, false);
-}
-
-TEST(correctness, throwing_move_ctor)
-{
-    bool internal_watch;
-    tested_function<int(int)> f1(
-        detector<false>{&internal_watch, detection_policy::BOTH});
-    internal_watch = false;
-    tested_function<int(int)> f2 = std::move(f1);
-    EXPECT_EQ(internal_watch, false);
-}
-
-TEST(correctness, nothrow_move_assign)
-{
-    bool copy_watch;
-    tested_function<int(int)> f1(
-        detector<true>{&copy_watch, detection_policy::COPY});
-    copy_watch = false;
-    tested_function<int(int)> f2;
-    f2 = std::move(f1);
-    EXPECT_EQ(copy_watch, false);
-}
-
-TEST(correctness, throwing_move_assign)
-{
-    bool internal_watch;
-    tested_function<int(int)> f1(
-        detector<false>{&internal_watch, detection_policy::BOTH});
-    internal_watch = false;
-    tested_function<int(int)> f2;
-    f2 = std::move(f1);
-    EXPECT_EQ(internal_watch, false);
-}
-
-struct tricky_movable;
-
-struct pointer_wrapper {
-    tricky_movable *pointer;
-};
-
 struct tricky_movable {
-    pointer_wrapper pwrapper;
-    tricky_movable() { pwrapper.pointer = this; }
+    tricky_movable *pointer;
+    tricky_movable() { pointer = this; }
     tricky_movable(tricky_movable const &) {}
     tricky_movable(tricky_movable &&other) noexcept
     {
-        pwrapper.pointer = this;
-        other.pwrapper.pointer = nullptr;
+        pointer = this;
+        other.pointer = nullptr;
     }
-    pointer_wrapper *get_pointer_wrapper() { return &pwrapper; }
     ptrdiff_t operator()() const noexcept
     {
-        return reinterpret_cast<ptrdiff_t>(pwrapper.pointer) -
+        return reinterpret_cast<ptrdiff_t>(pointer) -
                reinterpret_cast<ptrdiff_t>(this);
     }
     ~tricky_movable() {}
@@ -314,4 +231,164 @@ TEST(correctness, tricky_movable_assign)
     tested_function<ptrdiff_t()> my_f2;
     my_f2 = std::move(my_f);
     EXPECT_EQ(my_f2(), 0);
+}
+
+enum class detection_policy { COPY, MOVE, BOTH };
+
+template <bool Noexcept>
+struct detector {
+    static bool watcher;
+    static detection_policy policy;
+
+    detector() = default;
+
+    detector(detector const &other)
+    {
+        if (policy == detection_policy::COPY ||
+            policy == detection_policy::BOTH) {
+            watcher = true;
+        }
+    }
+
+    detector(detector &&other) noexcept(Noexcept)
+    {
+        if (policy == detection_policy::MOVE ||
+            policy == detection_policy::BOTH) {
+            watcher = true;
+        }
+    }
+
+    int operator()(int x) const { return x; }
+    ~detector() {}
+};
+template <>
+bool detector<true>::watcher = false;
+template <>
+detection_policy detector<true>::policy = detection_policy::BOTH;
+template <>
+bool detector<false>::watcher = false;
+template <>
+detection_policy detector<false>::policy = detection_policy::BOTH;
+
+TEST(noexcept, nothrow_move_ctor)
+{
+    detector<true>::policy = detection_policy::COPY;
+    tested_function<int(int)> f1(detector<true>{});
+    detector<true>::watcher = false;
+    tested_function<int(int)> f2 = std::move(f1);
+    EXPECT_EQ(detector<true>::watcher, false);
+}
+
+TEST(noexcept, throwing_move_ctor)
+{
+    detector<false>::policy = detection_policy::BOTH;
+    tested_function<int(int)> f1(detector<false>{});
+    detector<false>::watcher = false;
+    tested_function<int(int)> f2 = std::move(f1);
+    EXPECT_EQ(detector<false>::watcher, false);
+}
+
+TEST(noexcept, nothrow_move_assign)
+{
+    detector<true>::policy = detection_policy::COPY;
+    tested_function<int(int)> f1(detector<true>{});
+    detector<true>::watcher = false;
+    tested_function<int(int)> f2;
+    f2 = std::move(f1);
+    EXPECT_EQ(detector<true>::watcher, false);
+}
+
+TEST(noexcept, throwing_move_assign)
+{
+    detector<false>::policy = detection_policy::BOTH;
+    tested_function<int(int)> f1(detector<false>{});
+    detector<false>::watcher = false;
+    tested_function<int(int)> f2;
+    f2 = std::move(f1);
+    EXPECT_EQ(detector<false>::watcher, false);
+}
+
+TEST(noexcept, swap_noexcept)
+{
+    detector<true>::policy = detection_policy::COPY;
+    tested_function<int(int)> f1(detector<true>{});
+    tested_function<int(int)> f2(detector<true>{});
+    detector<true>::watcher = false;
+    f2.swap(f1);
+    EXPECT_EQ(detector<true>::watcher, false);
+}
+
+TEST(noexcept, swap_throwing)
+{
+    detector<false>::policy = detection_policy::BOTH;
+    tested_function<int(int)> f1(detector<false>{});
+    tested_function<int(int)> f2(detector<false>{});
+    detector<false>::watcher = false;
+    f2.swap(f1);
+    EXPECT_EQ(detector<false>::watcher, false);
+}
+
+struct heapless {
+    static bool new_watcher;
+    heapless() = default;
+    void operator()(int) const {}
+    void *operator new(size_t)
+    {
+        new_watcher = true;
+        return ::new heapless();
+    }
+    void operator delete(void *p) { free(p); }
+};
+bool heapless::new_watcher = false;
+
+TEST(small_object, basic)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f2{heapless{}};
+    EXPECT_EQ(heapless::new_watcher, false);
+}
+
+TEST(small_object, copy_ctor)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f{heapless{}};
+    tested_function<void(int)> my_f2{my_f};
+    EXPECT_EQ(heapless::new_watcher, false);
+}
+
+TEST(small_object, copy_assign)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f{heapless{}};
+    tested_function<void(int)> my_f2;
+    my_f2 = my_f;
+    EXPECT_EQ(heapless::new_watcher, false);
+}
+
+TEST(small_object, move_ctor)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f{heapless{}};
+    tested_function<void(int)> my_f2{std::move(my_f)};
+    EXPECT_EQ(heapless::new_watcher, false);
+}
+
+TEST(small_object, move_assign)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f{heapless{}};
+    tested_function<void(int)> my_f2;
+    my_f2 = {std::move(my_f)};
+    EXPECT_EQ(heapless::new_watcher, false);
+}
+
+TEST(small_object, swap)
+{
+    heapless::new_watcher = false;
+    tested_function<void(int)> my_f{heapless{}};
+    tested_function<void(int)> my_f2{heapless{}};
+    my_f.swap(my_f2);
+    EXPECT_EQ(heapless::new_watcher, false);
+    EXPECT_EQ(static_cast<bool>(my_f), true);
+    EXPECT_EQ(static_cast<bool>(my_f2), true);
 }
