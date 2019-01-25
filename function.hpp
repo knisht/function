@@ -88,8 +88,8 @@ struct function<F(Args...)> {
         }
     }
 
-    function(function &&other) noexcept
-    {
+
+    void make_move(function&& other) {
         if (other.is_small) {
             is_small = true;
             concept_ *other_concept =
@@ -102,6 +102,11 @@ struct function<F(Args...)> {
             is_small = false;
             new (&buffer) std::unique_ptr<concept_>(std::move(other.ptr));
         }
+    }
+
+    function(function &&other) noexcept
+    {
+        make_move(std::move(other));
     }
 
     function &operator=(const function &other)
@@ -119,18 +124,7 @@ struct function<F(Args...)> {
             (reinterpret_cast<std::unique_ptr<concept_> *>(&buffer))
                 ->~unique_ptr();
         }
-        if (other.is_small) {
-            is_small = true;
-            concept_ *other_concept =
-                reinterpret_cast<concept_ *>(&other.buffer);
-            other_concept->build_moved_copy(&buffer);
-            other_concept->~concept_();
-            other.is_small = false;
-            new (&other.buffer) std::unique_ptr<concept_>(nullptr);
-        } else {
-            is_small = false;
-            new (&buffer) std::unique_ptr<concept_>(std::move(other.ptr));
-        }
+        make_move(std::move(other));
         return *this;
     }
 
@@ -153,7 +147,7 @@ struct function<F(Args...)> {
 
     explicit operator bool() const noexcept
     {
-        return is_small || ptr.operator bool();
+        return is_small || static_cast<bool>(ptr);
     }
 
     ~function()
