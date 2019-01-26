@@ -18,8 +18,7 @@ struct function<F(Args...)> {
     static const size_t BUFFER_SIZE = 64;
 
     struct concept_ {
-        virtual F call(Args... args) const = 0;
-        virtual void build_copy(void *buf) = 0;
+        virtual F call(Args &&... args) const = 0;
         virtual void build_copy(void *buf) const = 0;
         virtual void build_moved_copy(void *buf) noexcept = 0;
         virtual std::unique_ptr<concept_> copy() const = 0;
@@ -28,15 +27,13 @@ struct function<F(Args...)> {
 
     template <typename T>
     struct model_ : concept_ {
-        model_(T &&t) : t(std::forward<T>(t)) {}
+        model_(T &&t) : t(std::move(t)) {}
         model_(T const &t) : t(t) {}
 
         std::unique_ptr<concept_> copy() const override
         {
             return std::make_unique<model_<T>>(t);
         }
-
-        void build_copy(void *buf) override { new (buf) model_<T>(t); }
 
         void build_copy(void *buf) const override { new (buf) model_<T>(t); }
 
@@ -47,7 +44,7 @@ struct function<F(Args...)> {
 
         ~model_() override = default;
 
-        F call(Args... args) const override
+        F call(Args &&... args) const override
         {
             return t(std::forward<Args>(args)...);
         }
@@ -88,8 +85,8 @@ struct function<F(Args...)> {
         }
     }
 
-
-    void make_move(function&& other) {
+    void make_move(function &&other)
+    {
         if (other.is_small) {
             is_small = true;
             concept_ *other_concept =
@@ -104,10 +101,7 @@ struct function<F(Args...)> {
         }
     }
 
-    function(function &&other) noexcept
-    {
-        make_move(std::move(other));
-    }
+    function(function &&other) noexcept { make_move(std::move(other)); }
 
     function &operator=(const function &other)
     {
@@ -135,7 +129,7 @@ struct function<F(Args...)> {
         *this = std::move(f);
     }
 
-    F operator()(Args... args) const
+    F operator()(Args &&... args) const
     {
         if (is_small) {
             return reinterpret_cast<concept_ const *>(&buffer)->call(
